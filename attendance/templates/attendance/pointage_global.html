@@ -1,0 +1,249 @@
+{% extends 'base.html' %}
+
+{% block title %}Pointage Global - ICC Management{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto">
+
+    <!-- En-tête -->
+    <div class="mb-8">
+        <h1 class="text-3xl font-bold text-white mb-2">Pointage Global 📋</h1>
+        <p class="text-slate-400">
+            Événement : <span class="text-indigo-400 font-semibold">{{ latest_event.name }}</span> 
+            <span class="text-slate-500">({{ latest_event.date }})</span>
+        </p>
+    </div>
+
+    <!-- Filtres (Admin uniquement) -->
+    {% if request.user.role == 'admin' %}
+    <div class="bg-slate-800 rounded-2xl p-6 border border-slate-700 mb-6">
+        <h3 class="text-lg font-semibold text-white mb-4">Filtrer par Département</h3>
+        <div class="flex flex-wrap gap-2">
+            <a href="{% url 'pointage_global' %}" 
+               class="px-4 py-2 rounded-full text-sm font-medium transition-all
+               {% if not selected_dept_id %}bg-indigo-600 text-white shadow-lg{% else %}bg-slate-700 text-slate-400 hover:bg-slate-600 hover:text-white border border-slate-600{% endif %}">
+                Tous les Départements
+            </a>
+            {% for dept in all_departments %}
+                <a href="?dept_id={{ dept.id }}" 
+                   class="px-4 py-2 rounded-full text-sm font-medium transition-all
+                   {% if selected_dept_id == dept.id|stringformat:"d" %}bg-indigo-600 text-white shadow-lg{% else %}bg-slate-700 text-slate-400 hover:bg-slate-600 hover:text-white border border-slate-600{% endif %}">
+                    {{ dept.name }}
+                </a>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Bouton Tout marquer présent + Enregistrer -->
+    <div class="flex flex-wrap gap-3 mb-6">
+        <button type="button" onclick="markAllPresent()" 
+                class="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-xl text-sm font-medium transition shadow-lg">
+            ✅ Tout marquer présent
+        </button>
+        <button type="button" onclick="saveAllPointages()" 
+                class="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-xl text-sm font-medium transition shadow-lg">
+            💾 Enregistrer tous les pointages
+        </button>
+    </div>
+
+    <!-- Liste des départements et membres -->
+    <form id="pointageForm" class="space-y-6">
+        {% csrf_token %}
+        <input type="hidden" name="event_id" value="{{ latest_event.id }}">
+        <input type="hidden" name="pointages" id="pointagesData">
+
+        {% for dept_data in departements_data %}
+        <div class="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden">
+            <!-- En-tête du département -->
+            <div class="bg-gradient-to-r from-indigo-600/20 to-purple-600/20 p-4 border-b border-slate-700">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <h2 class="text-xl font-bold text-white">{{ dept_data.department.name }}</h2>
+                        <p class="text-sm text-slate-400">{{ dept_data.total }} membre(s)</p>
+                    </div>
+                    <button type="button" onclick="markDeptPresent({{ dept_data.department.id }})" 
+                            class="bg-green-600/20 hover:bg-green-600/40 text-green-400 px-4 py-2 rounded-lg text-sm font-medium transition">
+                        ✅ Tout présent
+                    </button>
+                </div>
+            </div>
+
+            <!-- Liste des membres -->
+            <div class="divide-y divide-slate-700">
+                {% for item in dept_data.membres %}
+                <div class="p-4 hover:bg-slate-700/30 transition-colors" id="row_{{ item.membre.id }}">
+                    <div class="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
+                        <!-- Infos du membre -->
+                        <div class="flex items-center gap-4 flex-1">
+                            <div class="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center font-bold text-white text-lg flex-shrink-0">
+                                {{ item.membre.prenom|slice:":1" }}{{ item.membre.nom|slice:":1" }}
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <p class="text-white font-semibold text-lg">{{ item.membre.prenom }} {{ item.membre.nom }}</p>
+                                <p class="text-sm text-slate-400">
+                                    {{ item.membre.profession|default:"-" }}
+                                    {% if item.membre.telephone %}
+                                        • <a href="tel:{{ item.membre.telephone }}" class="text-indigo-400 hover:text-indigo-300">📞 {{ item.membre.telephone }}</a>
+                                    {% endif %}
+                                </p>
+                            </div>
+                        </div>
+
+                        <!-- Boutons de pointage -->
+                        <div class="flex gap-2 flex-shrink-0">
+                            <button type="button" onclick="setGlobalStatus({{ item.membre.id }}, 'present')" 
+                                    class="global-status-btn w-12 h-12 rounded-full bg-slate-700 hover:bg-green-600 transition flex items-center justify-center text-xl"
+                                    data-membre="{{ item.membre.id }}">
+                                ✅
+                            </button>
+                            <button type="button" onclick="setGlobalStatus({{ item.membre.id }}, 'absent')"
+                                    class="global-status-btn w-12 h-12 rounded-full bg-slate-700 hover:bg-red-600 transition flex items-center justify-center text-xl"
+                                    data-membre="{{ item.membre.id }}">
+                                ❌
+                            </button>
+                            <button type="button" onclick="setGlobalStatus({{ item.membre.id }}, 'excused')"
+                                    class="global-status-btn w-12 h-12 rounded-full bg-slate-700 hover:bg-yellow-600 transition flex items-center justify-center text-xl"
+                                    data-membre="{{ item.membre.id }}">
+                                ⚠️
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Input caché pour le statut -->
+                    <input type="hidden" name="status_{{ item.membre.id }}" 
+                           id="global_status_{{ item.membre.id }}" 
+                           value="{{ item.status }}"
+                           data-membre-id="{{ item.membre.id }}">
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% empty %}
+        <div class="bg-slate-800 rounded-2xl p-12 border border-slate-700 text-center">
+            <p class="text-slate-400 text-lg">Aucun membre trouvé pour ce département.</p>
+        </div>
+        {% endfor %}
+    </form>
+
+    <!-- Bouton Enregistrer en bas -->
+    <div class="sticky bottom-0 bg-slate-900/95 backdrop-blur border-t border-slate-700 p-4 mt-8">
+        <button type="button" onclick="saveAllPointages()" 
+                class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 px-6 rounded-xl text-lg transition shadow-2xl">
+            💾 Enregistrer tous les pointages
+        </button>
+    </div>
+</div>
+
+<script>
+// Stockage des statuts
+const globalStatuses = {};
+
+// Initialiser les statuts existants
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('[id^="global_status_"]').forEach(input => {
+        const membreId = input.dataset.membreId;
+        const status = input.value;
+        if (status) {
+            globalStatuses[membreId] = status;
+            updateGlobalUI(membreId, status);
+        }
+    });
+});
+
+function setGlobalStatus(membreId, status) {
+    globalStatuses[membreId] = status;
+    
+    // Mettre à jour l'input caché
+    const input = document.getElementById(`global_status_${membreId}`);
+    if (input) {
+        input.value = status;
+    }
+    
+    updateGlobalUI(membreId, status);
+}
+
+function updateGlobalUI(membreId, status) {
+    const row = document.getElementById(`row_${membreId}`);
+    const buttons = row.querySelectorAll('.global-status-btn');
+    
+    // Reset
+    buttons.forEach(btn => {
+        btn.classList.remove('ring-2', 'ring-white', 'bg-green-600', 'bg-red-600', 'bg-yellow-600');
+    });
+    row.classList.remove('bg-green-900/30', 'bg-red-900/30', 'bg-yellow-900/30', 'border-l-4', 'border-green-500', 'border-red-500', 'border-yellow-500');
+    
+    // Appliquer le style
+    if (status === 'present') {
+        row.classList.add('bg-green-900/30', 'border-l-4', 'border-green-500');
+        buttons[0].classList.add('ring-2', 'ring-white', 'bg-green-600');
+    } else if (status === 'absent') {
+        row.classList.add('bg-red-900/30', 'border-l-4', 'border-red-500');
+        buttons[1].classList.add('ring-2', 'ring-white', 'bg-red-600');
+    } else if (status === 'excused') {
+        row.classList.add('bg-yellow-900/30', 'border-l-4', 'border-yellow-500');
+        buttons[2].classList.add('ring-2', 'ring-white', 'bg-yellow-600');
+    }
+}
+
+function markAllPresent() {
+    document.querySelectorAll('[id^="global_status_"]').forEach(input => {
+        const membreId = input.dataset.membreId;
+        setGlobalStatus(membreId, 'present');
+    });
+}
+
+function markDeptPresent(deptId) {
+    // Marquer tous les membres d'un département spécifique
+    const deptSection = document.querySelector(`#row_`).closest('.bg-slate-800');
+    deptSection.querySelectorAll('[id^="global_status_"]').forEach(input => {
+        const membreId = input.dataset.membreId;
+        setGlobalStatus(membreId, 'present');
+    });
+}
+
+function saveAllPointages() {
+    // Construire le tableau JSON des pointages
+    const pointages = [];
+    document.querySelectorAll('[id^="global_status_"]').forEach(input => {
+        const membreId = input.dataset.membreId;
+        const status = input.value;
+        if (status) {
+            pointages.push({
+                membre_id: parseInt(membreId),
+                status: status
+            });
+        }
+    });
+
+    if (pointages.length === 0) {
+        alert('Veuillez pointer au moins un membre avant d\'enregistrer.');
+        return;
+    }
+
+    // Envoyer via fetch API
+    const formData = new FormData();
+    formData.append('event_id', document.querySelector('input[name="event_id"]').value);
+    formData.append('pointages', JSON.stringify(pointages));
+    formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+
+    fetch('{% url "pointage_global_save" %}', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(`✅ ${data.count} présences enregistrées avec succès !`);
+            location.reload();
+        } else {
+            alert('❌ Erreur : ' + data.error);
+        }
+    })
+    .catch(error => {
+        console.error('Erreur:', error);
+        alert('❌ Une erreur est survenue.');
+    });
+}
+</script>
+{% endblock %}

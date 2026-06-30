@@ -10,4 +10,8 @@ urlpatterns = [
     path('search/', views.global_search, name='global_search'),  # NOUVEAU (voir étape 2)
     path('serviteur/add/', views.add_serviteur, name='add_serviteur'),
     path('serviteur/delete/<int:user_id>/', views.delete_serviteur, name='delete_serviteur'),
+    path('pointage-global/', views.pointage_global, name='pointage_global'),
+    path('pointage-global/save/', views.pointage_global_save, name='pointage_global_save'),
+    path('membre/<int:user_id>/', views.historique_membre, name='historique_membre'),
+    
 ]

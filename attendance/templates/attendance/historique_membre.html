@@ -1,0 +1,134 @@
+{% extends 'base.html' %}
+
+{% block title %}Historique - {{ membre.prenom }} {{ membre.nom }}{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto">
+
+    <!-- Retour -->
+    <a href="{% url 'chef_dashboard' %}" class="text-indigo-400 hover:text-indigo-300 text-sm mb-4 inline-block">
+        ← Retour au tableau de bord
+    </a>
+
+    <!-- En-tête du membre -->
+    <div class="bg-slate-800 rounded-2xl p-6 border border-slate-700 mb-6">
+        <div class="flex items-center gap-4 mb-4">
+            {% if membre.photo %}
+                <img src="{{ membre.photo.url }}" alt="{{ membre.prenom }}" class="w-16 h-16 rounded-full object-cover">
+            {% else %}
+                <div class="w-16 h-16 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center font-bold text-white text-2xl">
+                    {{ membre.prenom|slice:":1" }}{{ membre.nom|slice:":1" }}
+                </div>
+            {% endif %}
+            <div>
+                <h1 class="text-2xl font-bold text-white">{{ membre.prenom }} {{ membre.nom }}</h1>
+                <p class="text-slate-400 text-sm">
+                    {{ membre.departement.name }} • {{ membre.profession|default:"-" }}
+                    {% if membre.telephone %} • 📞 {{ membre.telephone }}{% endif %}
+                </p>
+            </div>
+        </div>
+
+        <!-- Stats rapides -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div class="bg-slate-900 p-3 rounded-lg text-center">
+                <p class="text-xs text-slate-400">Total</p>
+                <p class="text-2xl font-bold text-indigo-400">{{ total }}</p>
+            </div>
+            <div class="bg-slate-900 p-3 rounded-lg text-center">
+                <p class="text-xs text-slate-400">Présents</p>
+                <p class="text-2xl font-bold text-green-400">{{ presents }}</p>
+            </div>
+            <div class="bg-slate-900 p-3 rounded-lg text-center">
+                <p class="text-xs text-slate-400">Absents</p>
+                <p class="text-2xl font-bold text-red-400">{{ absents }}</p>
+            </div>
+            <div class="bg-slate-900 p-3 rounded-lg text-center">
+                <p class="text-xs text-slate-400">Taux</p>
+                <p class="text-2xl font-bold {% if taux >= 80 %}text-green-400{% elif taux >= 50 %}text-yellow-400{% else %}text-red-400{% endif %}">
+                    {{ taux }}%
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Graphique d'évolution -->
+    {% if graph_labels %}
+    <div class="bg-slate-800 rounded-2xl p-6 border border-slate-700 mb-6">
+        <h2 class="text-lg font-semibold text-white mb-4">📈 Évolution (10 derniers événements)</h2>
+        <div class="relative h-48">
+            <canvas id="histChart"></canvas>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Historique complet -->
+    <div class="bg-slate-800 rounded-2xl p-6 border border-slate-700">
+        <h2 class="text-lg font-semibold text-white mb-4">📜 Historique complet</h2>
+        <div class="space-y-2 max-h-[500px] overflow-y-auto">
+            {% for p in presences %}
+                <div class="flex justify-between items-center bg-slate-900 p-3 rounded-lg border border-slate-700">
+                    <div>
+                        <p class="text-white font-medium text-sm">{{ p.event.name }}</p>
+                        <p class="text-xs text-slate-400">{{ p.event.date }} • {{ p.event.get_event_type_display }}</p>
+                    </div>
+                    <div class="text-right">
+                        {% if p.status == 'present' %}
+                            <span class="inline-block px-3 py-1 rounded-full text-xs font-bold bg-green-900/30 text-green-400 border border-green-700">✅ Présent</span>
+                        {% elif p.status == 'absent' %}
+                            <span class="inline-block px-3 py-1 rounded-full text-xs font-bold bg-red-900/30 text-red-400 border border-red-700">❌ Absent</span>
+                        {% else %}
+                            <span class="inline-block px-3 py-1 rounded-full text-xs font-bold bg-yellow-900/30 text-yellow-400 border border-yellow-700">⚠️ Excusé</span>
+                        {% endif %}
+                        <p class="text-xs text-slate-500 mt-1">Pointé par {{ p.marked_by.prenom }}</p>
+                    </div>
+                </div>
+            {% empty %}
+                <p class="text-slate-400 text-center py-8">Aucun historique disponible.</p>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+{% if graph_labels %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    Chart.defaults.color = '#94a3b8';
+    Chart.defaults.borderColor = '#334155';
+
+    new Chart(document.getElementById('histChart'), {
+        type: 'line',
+        data: {
+            labels: {{ graph_labels|safe }},
+            datasets: [{
+                label: 'Présent (1) / Absent (0)',
+                data: {{ graph_data|safe }},
+                borderColor: '#6366f1',
+                backgroundColor: 'rgba(99, 102, 241, 0.2)',
+                tension: 0.4,
+                fill: true,
+                pointBackgroundColor: '#6366f1',
+                pointBorderColor: '#fff',
+                pointRadius: 5
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: { 
+                    beginAtZero: true,
+                    max: 1,
+                    ticks: {
+                        callback: function(value) {
+                            return value === 1 ? 'Présent' : 'Absent';
+                        }
+                    }
+                }
+            },
+            plugins: { legend: { display: false } }
+        }
+    });
+</script>
+{% endif %}
+{% endblock %}

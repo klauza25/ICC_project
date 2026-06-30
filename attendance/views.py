@@ -6,6 +6,9 @@ from django.utils import timezone
 from datetime import date, timedelta
 from account.models import CustomUser, Department
 from .models import ServiceEvent, Attendance
+from django.http import JsonResponse
+from datetime import date
+from django.utils import timezone
 
 
 # --- DÉCORATEUR DE SÉCURITÉ STRICT ---
@@ -169,30 +172,33 @@ def chef_dashboard(request):
 
 
 
-# --- VUE MARK ATTENDANCE (POINTAGE) ---
-@login_required
-def mark_attendance(request, event_id):
-    # 🛑 BLOCAGE STRICT ET IMMÉDIAT (Sans décorateur)
-    if request.user.role not in ['chef', 'admin']:
-        messages.error(request, "🚫 ACCÈS INTERDIT : Seuls les chefs peuvent pointer.")
-        return redirect('serviteur_dashboard')
 
+
+# --- VUE MARK ATTENDANCE (POINTAGE) ---
+@chef_or_admin_required
+def mark_attendance(request, event_id):
+    """Page de pointage - Admin choisit le département, Chef pointe son département"""
     event = get_object_or_404(ServiceEvent, id=event_id)
     
-    # Logique de département
     if request.user.role == 'admin':
         dept_id = request.GET.get('dept')
+        
+        # Si l'admin n'a pas choisi de département, afficher la page de sélection
         if not dept_id:
-            messages.error(request, "Admin: Veuillez sélectionner un département.")
-            return redirect('chef_dashboard')
+            departments = Department.objects.all()
+            return render(request, 'attendance/select_department.html', {
+                'event': event,
+                'departments': departments
+            })
+        
         department = get_object_or_404(Department, id=dept_id)
     else:
-        # Le chef ne voit que son département
+        # Chef : utilise automatiquement son département
         department = request.user.departement
         if not department:
-            messages.error(request, "Vous n'avez pas de département.")
-            return redirect('serviteur_dashboard')
-            
+            messages.error(request, "Vous n'avez pas de département assigné.")
+            return redirect('chef_dashboard')
+    
     members = CustomUser.objects.filter(departement=department, role='serviteur')
     
     if request.method == 'POST':
@@ -205,14 +211,13 @@ def mark_attendance(request, event_id):
                 )
         messages.success(request, f"✅ Présences pour {event.name} enregistrées !")
         return redirect('chef_dashboard')
-        
+    
     existing = {att.servant.id: att.status for att in Attendance.objects.filter(event=event, department=department)}
     members_with_status = [{'member': m, 'status': existing.get(m.id, '')} for m in members]
     
     return render(request, 'attendance/mark_attendance.html', {
         'event': event, 'department': department, 'members_with_status': members_with_status
     })
-    
     
     
     
@@ -466,3 +471,204 @@ def delete_serviteur(request, user_id):
     return render(request, 'attendance/delete_serviteur.html', {
         'serviteur': serviteur
     })
+    
+    
+    
+    
+    
+
+
+
+
+@chef_or_admin_required
+def pointage_global(request):
+    """Pointage automatique - Crée l'événement du jour s'il n'existe pas"""
+    
+    today = date.today()
+    
+    # Chercher un événement existant pour aujourd'hui
+    latest_event = ServiceEvent.objects.filter(date=today).first()
+    
+    # Si aucun événement n'existe pour aujourd'hui, le créer automatiquement
+    if not latest_event:
+        # Déterminer le type d'événement selon le jour de la semaine
+        day_names = {
+            0: 'Lundi', 1: 'Mardi', 2: 'Mercredi', 3: 'Jeudi', 
+            4: 'Vendredi', 5: 'Samedi', 6: 'Dimanche'
+        }
+        day_name = day_names.get(today.weekday(), 'Culte')
+        
+        # Créer l'événement automatique
+        latest_event = ServiceEvent.objects.create(
+            name=f"{day_name} - {today.strftime('%d/%m/%Y')}",
+            event_type='culte_dimanche' if today.weekday() == 6 else 'autre',
+            date=today
+        )
+        messages.success(request, f"✅ Événement '{latest_event.name}' créé automatiquement pour aujourd'hui !")
+    
+    # Déterminer les départements à afficher
+    if request.user.role == 'chef':
+        departments = Department.objects.filter(id=request.user.departement.id) if request.user.departement else Department.objects.none()
+    else:
+        selected_dept_id = request.GET.get('dept_id')
+        departments = Department.objects.filter(id=selected_dept_id) if selected_dept_id else Department.objects.all()
+    
+    departements_data = []
+    for dept in departments:
+        membres = CustomUser.objects.filter(departement=dept, role='serviteur').order_by('nom', 'prenom')
+        membres_with_status = []
+        for membre in membres:
+            attendance = Attendance.objects.filter(servant=membre, event=latest_event).first()
+            membres_with_status.append({
+                'membre': membre,
+                'status': attendance.status if attendance else ''
+            })
+        if membres_with_status:
+            departements_data.append({
+                'department': dept,
+                'membres': membres_with_status
+            })
+    
+    return render(request, 'attendance/pointage_global.html', {
+        'latest_event': latest_event,
+        'departements_data': departements_data,
+        'all_departments': Department.objects.all(),
+        'selected_dept_id': request.GET.get('dept_id') if request.user.role == 'admin' else None,
+    })
+
+
+
+# @chef_or_admin_required
+# def pointage_global_save(request):
+#     """Sauvegarder les pointages du pointage global"""
+    
+#     if request.method != 'POST':
+#         return redirect('pointage_global')
+    
+#     event_id = request.POST.get('event_id')
+#     event = get_object_or_404(ServiceEvent, id=event_id)
+    
+#     # Récupérer tous les pointages envoyés
+#     pointages_data = request.POST.get('pointages', '')
+    
+#     if not pointages_data:
+#         messages.error(request, "Aucun pointage à enregistrer.")
+#         return redirect('pointage_global')
+    
+#     # Parser les données JSON
+#     import json
+#     pointages = json.loads(pointages_data)
+    
+#     count = 0
+#     for pointage in pointages:
+#         membre_id = pointage.get('membre_id')
+#         status = pointage.get('status')
+        
+#         if membre_id and status:
+#             membre = get_object_or_404(CustomUser, id=membre_id)
+            
+#             # Sécurité : vérifier que le chef ne pointe que son département
+#             if request.user.role != 'admin' and membre.departement != request.user.departement:
+#                 continue
+            
+#             Attendance.objects.update_or_create(
+#                 servant=membre,
+#                 event=event,
+#                 defaults={
+#                     'department': membre.departement,
+#                     'status': status,
+#                     'marked_by': request.user
+#                 }
+#             )
+#             count += 1
+    
+#     messages.success(request, f"✅ {count} présences enregistrées pour {event.name} !")
+#     return redirect('pointage_global')
+
+
+
+@chef_or_admin_required
+def pointage_global_save(request):
+    """Sauvegarder les pointages du pointage global (API JSON)"""
+    
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Méthode non autorisée'})
+    
+    event_id = request.POST.get('event_id')
+    event = get_object_or_404(ServiceEvent, id=event_id)
+    
+    pointages_data = request.POST.get('pointages', '')
+    
+    if not pointages_data:
+        return JsonResponse({'success': False, 'error': 'Aucun pointage à enregistrer'})
+    
+    import json
+    pointages = json.loads(pointages_data)
+    
+    count = 0
+    for pointage in pointages:
+        membre_id = pointage.get('membre_id')
+        status = pointage.get('status')
+        
+        if membre_id and status:
+            membre = get_object_or_404(CustomUser, id=membre_id)
+            
+            # Sécurité : vérifier que le chef ne pointe que son département
+            if request.user.role != 'admin' and membre.departement != request.user.departement:
+                continue
+            
+            Attendance.objects.update_or_create(
+                servant=membre,
+                event=event,
+                defaults={
+                    'department': membre.departement,
+                    'status': status,
+                    'marked_by': request.user
+                }
+            )
+            count += 1
+    
+    return JsonResponse({'success': True, 'count': count})
+
+
+
+@login_required
+def historique_membre(request, user_id):
+    """Historique complet des présences d'un serviteur"""
+    membre = get_object_or_404(CustomUser, id=user_id)
+    
+    # Sécurité : le chef ne peut voir que les membres de son département
+    if request.user.role == 'chef' and membre.departement != request.user.departement:
+        messages.error(request, "Accès refusé.")
+        return redirect('chef_dashboard')
+    
+    # Récupérer tout l'historique
+    presences = Attendance.objects.filter(servant=membre).order_by('-event__date')
+    
+    # Statistiques globales
+    total = presences.count()
+    presents = presences.filter(status='present').count()
+    absents = presences.filter(status='absent').count()
+    excuses = presences.filter(status='excused').count()
+    taux = round((presents / total) * 100, 1) if total > 0 else 0
+    
+    # Évolution sur les 10 derniers événements (pour graphique)
+    derniers_events = presences[:10]
+    graph_labels = []
+    graph_data = []
+    for p in reversed(list(derniers_events)):
+        graph_labels.append(p.event.date.strftime('%d/%m'))
+        graph_data.append(1 if p.status == 'present' else 0)
+    
+    context = {
+        'membre': membre,
+        'presences': presences,
+        'total': total,
+        'presents': presents,
+        'absents': absents,
+        'excuses': excuses,
+        'taux': taux,
+        'graph_labels': graph_labels,
+        'graph_data': graph_data,
+    }
+    return render(request, 'attendance/historique_membre.html', context)
